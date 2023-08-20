@@ -6,8 +6,15 @@ import (
 	"strings"
 
 	"github.com/gomods/athens/pkg/errors"
+	"github.com/gomods/athens/pkg/vanity"
 	"github.com/gorilla/mux"
 )
+
+var replacements []vanity.Replacement
+
+func init() {
+	replacements = vanity.ReplacementsFromEnv()
+}
 
 // GetModule gets the module from the path of a ?go-get=1 request.
 func GetModule(r *http.Request) (string, error) {
@@ -16,7 +23,17 @@ func GetModule(r *http.Request) (string, error) {
 	if module == "" {
 		return "", errors.E(op, "missing module parameter")
 	}
-	return DecodePath(module)
+	modulePath, err := DecodePath(module)
+	if err != nil {
+		return "", err
+	}
+	for idx := range replacements {
+		if strings.HasPrefix(modulePath, replacements[idx].Vanity) {
+			modulePath = replacements[idx].Replacement + strings.TrimPrefix(modulePath, replacements[idx].Vanity)
+		}
+	}
+
+	return modulePath, err
 }
 
 // GetVersion gets the version from the path of a ?go-get=1 request.
