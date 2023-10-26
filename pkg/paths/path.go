@@ -13,7 +13,7 @@ import (
 var replacements []vanity.Replacement
 
 func init() {
-	replacements = vanity.ReplacementsFromEnv()
+	replacements = vanity.ReplacementsFromCfg()
 }
 
 // GetModule gets the module from the path of a ?go-get=1 request.
