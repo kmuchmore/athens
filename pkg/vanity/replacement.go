@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/gomods/athens/pkg/vanity/plugins/gopkg"
 	"github.com/gorilla/mux"
@@ -27,7 +28,21 @@ var (
 	replacements []Replacement
 	plugins      map[string]VanityPlugin
 	cache        map[string]*entry
+	cacheMux     sync.RWMutex
 )
+
+func updateCache(key string, value *entry) {
+	cacheMux.Lock()
+	cache[key] = value
+	cacheMux.Unlock()
+}
+
+func readCache(key string) (*entry, bool) {
+	cacheMux.RLock()
+	defer cacheMux.RUnlock()
+	e, ok := cache[key]
+	return e, ok
+}
 
 type Replacement struct {
 	Vanity      string `json:"vanity"`
@@ -43,6 +58,7 @@ func init() {
 
 	plugins = make(map[string]VanityPlugin)
 	cache = make(map[string]*entry)
+	cacheMux = sync.RWMutex{}
 
 	dataBytes, err := os.ReadFile(cfgJson)
 	if err != nil {
@@ -91,8 +107,8 @@ func ReplaceMod(path string, req *http.Request) string {
 						replModule:    repl,
 						replVersion:   ver,
 					}
-					cache[path] = &newE
-					cache[newE.replModule] = &newE
+					updateCache(path, &newE)
+					updateCache(newE.replModule, &newE)
 					return repl
 				}
 				slog.Error("undefined vanity plugin", slog.String("Plugin", replacements[idx].Plugin))
@@ -103,8 +119,8 @@ func ReplaceMod(path string, req *http.Request) string {
 				replModule:    strings.Replace(path, replacements[idx].Vanity, replacements[idx].Replacement, 1),
 				replVersion:   mux.Vars(req)["version"],
 			}
-			cache[path] = &newE
-			cache[newE.replModule] = &newE
+			updateCache(path, &newE)
+			updateCache(newE.replModule, &newE)
 
 			return newE.replModule
 		}
@@ -113,7 +129,7 @@ func ReplaceMod(path string, req *http.Request) string {
 }
 
 func Restore(path string) (string, bool) {
-	if e, ok := cache[path]; ok {
+	if e, ok := readCache(path); ok {
 		return e.vanityModule, true
 	}
 	return path, false
