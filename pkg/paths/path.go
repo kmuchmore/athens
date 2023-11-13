@@ -10,12 +10,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var replacements []vanity.Replacement
-
-func init() {
-	replacements = vanity.ReplacementsFromCfg()
-}
-
 // GetModule gets the module from the path of a ?go-get=1 request.
 func GetModule(r *http.Request) (string, error) {
 	const op errors.Op = "paths.GetModule"
@@ -27,12 +21,8 @@ func GetModule(r *http.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for idx := range replacements {
-		if strings.HasPrefix(modulePath, replacements[idx].Vanity) {
-			modulePath = replacements[idx].Replacement + strings.TrimPrefix(modulePath, replacements[idx].Vanity)
-		}
-	}
 
+	modulePath = vanity.ReplaceMod(modulePath, r)
 	return modulePath, err
 }
 
@@ -44,6 +34,7 @@ func GetVersion(r *http.Request) (string, error) {
 	if version == "" {
 		return "", errors.E(op, "missing version parameter")
 	}
+
 	return DecodePath(version)
 }
 

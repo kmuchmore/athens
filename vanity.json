@@ -1,0 +1,18 @@
+[
+    {
+        "vanity": "golang.org/x",
+        "repl": "github.com/golang"
+    },
+    {
+        "vanity": "honnef.co/go/tools",
+        "repl": "github.com/dominikh/go-tools"
+    },
+    {
+        "vanity": "mvdan.cc",
+        "repl": "github.com/mvdan"
+    },
+    {
+        "vanity": "gopkg.in",
+        "plugin": "gopkg.in"
+    }
+]

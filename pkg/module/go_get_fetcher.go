@@ -26,7 +26,6 @@ type goGetFetcher struct {
 	goBinaryName string
 	envVars      []string
 	gogetDir     string
-	replacements []vanity.Replacement
 }
 
 type goModule struct {
@@ -53,7 +52,6 @@ func NewGoGetFetcher(goBinaryName, gogetDir string, envVars []string, fs afero.F
 		goBinaryName: goBinaryName,
 		envVars:      envVars,
 		gogetDir:     gogetDir,
-		replacements: vanity.ReplacementsFromCfg(),
 	}, nil
 }
 
@@ -145,86 +143,98 @@ func (g *goGetFetcher) Fetch(ctx context.Context, mod, ver string) (*storage.Ver
 		} `json:"Origin,omitempty"`
 	}{}
 
-	for idx := range g.replacements {
-		if strings.Contains(m.Path, g.replacements[idx].Replacement) {
-			if err := g.copyDir(m.Dir, g.replacements[idx].Replacement, g.replacements[idx].Vanity); err != nil {
+	replMod := m.Path
+	vanityMod, ok := vanity.Restore(m.Path)
+	if ok {
+		if err := g.copyDir(m.Dir, replMod, vanityMod); err != nil {
+			return nil, errors.E(op, err)
+		}
+		if err := g.copyDir(path.Dir(m.Zip), replMod, vanityMod); err != nil {
+			return nil, errors.E(op, err)
+		}
+		m.Path = strings.Replace(m.Path, replMod, vanityMod, 1)
+		m.Info = strings.Replace(m.Info, replMod, vanityMod, 1)
+		m.GoMod = strings.Replace(m.GoMod, replMod, vanityMod, 1)
+		origZipPath := m.Zip
+		m.Zip = strings.Replace(m.Zip, replMod, vanityMod, 1)
+		m.Dir = strings.Replace(m.Dir, replMod, vanityMod, 1)
+
+		modBytes, err := afero.ReadFile(g.fs, m.GoMod)
+		if err != nil {
+			return nil, errors.E(op, err)
+		}
+		modLines := strings.Split(string(modBytes), "\n")
+		if strings.Contains(modLines[0], replMod) {
+			modLines[0] = strings.Replace(modLines[0], replMod, vanityMod, 1)
+			if err = afero.WriteFile(g.fs, m.GoMod, []byte(strings.Join(modLines, "\n")), 0644); err != nil {
 				return nil, errors.E(op, err)
 			}
-			if err := g.copyDir(path.Dir(m.Zip), g.replacements[idx].Replacement, g.replacements[idx].Vanity); err != nil {
-				return nil, errors.E(op, err)
-			}
-			m.Path = strings.Replace(m.Path, g.replacements[idx].Replacement, g.replacements[idx].Vanity, 1)
-			m.Info = strings.Replace(m.Info, g.replacements[idx].Replacement, g.replacements[idx].Vanity, 1)
-			m.GoMod = strings.Replace(m.GoMod, g.replacements[idx].Replacement, g.replacements[idx].Vanity, 1)
-			origZipPath := m.Zip
-			m.Zip = strings.Replace(m.Zip, g.replacements[idx].Replacement, g.replacements[idx].Vanity, 1)
-			m.Dir = strings.Replace(m.Dir, g.replacements[idx].Replacement, g.replacements[idx].Vanity, 1)
+		}
 
-			err = func() error {
-				oldArchive, err := g.fs.Open(origZipPath)
-				if err != nil {
-					return err
-				}
-				defer oldArchive.Close()
-				oldArchiveInfo, err := oldArchive.Stat()
-				if err != nil {
-					return err
-				}
-
-				zipReader, err := zip.NewReader(oldArchive, oldArchiveInfo.Size())
-				if err != nil {
-					return err
-				}
-
-				fmt.Printf("converting zip archive %s%s -> %s%s\n", g.replacements[idx].Replacement, strings.Split(origZipPath, g.replacements[idx].Replacement)[1], g.replacements[idx].Vanity, strings.Split(m.Zip, g.replacements[idx].Vanity)[1])
-				newArchive, err := g.fs.Create(m.Zip)
-				if err != nil {
-					return err
-				}
-				defer newArchive.Close()
-
-				zipWriter := zip.NewWriter(newArchive)
-				defer zipWriter.Close()
-
-				for _, file := range zipReader.File {
-					newPath := strings.Replace(file.Name, g.replacements[idx].Replacement, g.replacements[idx].Vanity, 1)
-					writer, err := zipWriter.Create(newPath)
-					if err != nil {
-						return err
-					}
-
-					if file.FileInfo().IsDir() {
-						continue
-					}
-
-					reader, err := file.Open()
-					if err != nil {
-						return err
-					}
-					_, err = io.Copy(writer, reader)
-					if err != nil {
-						return err
-					}
-					reader.Close()
-				}
-
-				return nil
-			}()
+		err = func() error {
+			oldArchive, err := g.fs.Open(origZipPath)
 			if err != nil {
-				return nil, errors.E(op, err)
+				return err
+			}
+			defer oldArchive.Close()
+			oldArchiveInfo, err := oldArchive.Stat()
+			if err != nil {
+				return err
 			}
 
-			if err := json.Unmarshal([]byte(info), &modInfo); err != nil {
-				return nil, errors.E(op, err)
-			}
-			if modInfo.Origin != nil {
-				modInfo.Origin.URL = strings.Replace(modInfo.Origin.URL, g.replacements[idx].Replacement, g.replacements[idx].Vanity, 1)
-			}
-			info, err = json.Marshal(modInfo)
+			zipReader, err := zip.NewReader(oldArchive, oldArchiveInfo.Size())
 			if err != nil {
-				return nil, errors.E(op, err)
+				return err
 			}
-			break
+
+			fmt.Printf("converting zip archive %s%s -> %s%s\n", replMod, strings.Split(origZipPath, replMod)[1], vanityMod, strings.Split(m.Zip, vanityMod)[1])
+			newArchive, err := g.fs.Create(m.Zip)
+			if err != nil {
+				return err
+			}
+			defer newArchive.Close()
+
+			zipWriter := zip.NewWriter(newArchive)
+			defer zipWriter.Close()
+
+			for _, file := range zipReader.File {
+				newPath := strings.Replace(file.Name, replMod, vanityMod, 1)
+				writer, err := zipWriter.Create(newPath)
+				if err != nil {
+					return err
+				}
+
+				if file.FileInfo().IsDir() {
+					continue
+				}
+
+				reader, err := file.Open()
+				if err != nil {
+					return err
+				}
+
+				_, err = io.Copy(writer, reader)
+				if err != nil {
+					return err
+				}
+				reader.Close()
+			}
+
+			return nil
+		}()
+		if err != nil {
+			return nil, errors.E(op, err)
+		}
+
+		if err := json.Unmarshal([]byte(info), &modInfo); err != nil {
+			return nil, errors.E(op, err)
+		}
+		if modInfo.Origin != nil {
+			modInfo.Origin.URL = strings.Replace(modInfo.Origin.URL, replMod, vanityMod, 1)
+		}
+		info, err = json.Marshal(modInfo)
+		if err != nil {
+			return nil, errors.E(op, err)
 		}
 	}
 
